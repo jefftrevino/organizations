@@ -83,11 +83,14 @@ def create_stream_rhythm(divisor, phrase_length, denom):
     maker = rhythmmakertools.TaleaRhythmMaker(talea)
     selections = maker(divisions)
     voice = Voice(selections)
-    voice.extend(scoretools.make_rests(orig_divisions))
+    maker = LeafMaker()
+    pitches = len(orig_divisions) * [None]
+    rests = maker(pitches, orig_divisions)
+    voice.extend(rests)
     divisions.extend(orig_divisions)
     result = mutate(voice[:]).split(divisions)
     for s, d in zip(result, divisions):
-        Measure(TimeSignature(d), s)
+        mutate(s).wrap(Measure(d, []))
     return voice
 
 
@@ -146,13 +149,13 @@ def deoctavize_pitches(pitches):
 
 
 def same_pitch_class(p1, p2):
-    if p1.pitch_class_name == p2.pitch_class_name:
+    if p1.pitch_class == p2.pitch_class:
         return True
     return False
 
 
 def is_second(p1, p2):
-    if abs(p1.pitch_class_number - p2.pitch_class_number) <= 2:
+    if abs(p1.number - p2.number) <= 2:
         return True
     return False
 
@@ -185,13 +188,10 @@ def choose_starting_pitch_indexes(pitch_lists):
 
 
 def add_stream_voices_to_group(phrase_length, divisors, denominator, staff_group, scale_index):
-    #print("divisors is:",divisors)
     scale = scales[scale_index]
     pitch_lists = make_pitch_lists(scale)
     stream_rhythm_voices = []
     starting_pitch_indexes = choose_starting_pitch_indexes(pitch_lists)
-    # starting_pitches = []
-    # divisors = sequencetools.rotate_sequence(divisors,1)
     for x in range(3):
         starting_pitch_index = starting_pitch_indexes[x]
         stream_rhythm_voices.append(create_stream_rhythm(divisors[x], phrase_length, denominator))
@@ -205,11 +205,6 @@ def add_stream_voices_to_group(phrase_length, divisors, denominator, staff_group
     top_staff[0].extend(stream_rhythm_voices[0][:])
     top_staff[1].extend(stream_rhythm_voices[1][:])
     bottom_staff[0].extend(stream_rhythm_voices[2][:])
-        # start_tempo = Markup('Vivace')
-        # attach(start_tempo, top_voice_selections[0])
-        # end_tempo = Markup('Adagio')
-        # attach(end_tempo, top_voice_selections[-1])
-        # add_text_spanner_to_leaves('ritenuto', top_voice_selections)
 
 
 def add_phrase_to_group(phrase_length, denominator, staff_group, x):
@@ -223,8 +218,6 @@ def add_phrase_to_group(phrase_length, denominator, staff_group, x):
 def format_voices(staff_group):
     top_staff = staff_group[0]
     bottom_staff = staff_group[1]
-    #top_voice_first_leaf = inspect_(top_staff[0]).get_leaf(0)
-    #bottom_voice_first_leaf = inspect_(top_staff[1]).get_leaf(0)
     voices = [v for v in iterate(top_staff).by_class(Voice)]
     voice_one_leaves = iterate(voices[0]).by_leaf()
     for note_run in iterate(voice_one_leaves).by_run(prototype=Note):
@@ -288,7 +281,7 @@ def get_pitch_class_string(abbreviation):
     return markuptools.MarkupCommand("left-align", "\\teeny", base+rest)
 
 def isTiedTo(note):
-    theTie = inspect_(note).get_logical_tie()
+    theTie = inspect(note).get_logical_tie()
     if 1 == len(theTie):
         return False
     elif 1 < len(theTie) and theTie.head == note:
@@ -300,18 +293,18 @@ def add_markup_to_illegible_note(note):
     if not isinstance(note, Note):
         return None
     padding = 0.5
-    if note.written_pitch.pitch_number >= 31 and not isTiedTo(note):
-        class_abbreviation = str(note.written_pitch.pitch_class_name)
+    if note.written_pitch.number >= 31 and not isTiedTo(note):
+        class_abbreviation = str(note.written_pitch.pitch_class)
         letter = get_pitch_class_string(class_abbreviation)
         padded_markup = markuptools.MarkupCommand('pad-markup', schemetools.Scheme( padding ), letter)
         markup = markuptools.Markup(padded_markup, direction=Up)
         attach(markup, note)
-    elif note.written_pitch.pitch_number <= -27 and not isTiedTo(note):
-        class_abbreviation = str(note.written_pitch.pitch_class_name)
+    elif note.written_pitch.number <= -27 and not isTiedTo(note):
+        class_abbreviation = str(note.written_pitch.pitch_class)
         letter = get_pitch_class_string(class_abbreviation)
-        padded_markup = abjad.markuptools.MarkupCommand('pad-markup', abjad.schemetools.Scheme( padding ), letter)
-        markup = abjad.markuptools.Markup(padded_markup, direction=Down)
-        abjad.attach(markup, note)
+        padded_markup = markuptools.MarkupCommand('pad-markup', schemetools.Scheme( padding ), letter)
+        markup = markuptools.Markup(padded_markup, direction=Down)
+        attach(markup, note)
 
 def format_score(score):
     doublebar = indicatortools.BarLine('|.')
@@ -320,7 +313,7 @@ def format_score(score):
     attach(doublebar, score[0][0][0][-1][-1])
 
 def are_in_same_tie(leaf1, leaf2):
-    the_tie = inspect_(leaf1).get_logical_tie()
+    the_tie = inspect(leaf1).get_logical_tie()
     if leaf2 in the_tie:
         return True
     return False
@@ -328,7 +321,7 @@ def are_in_same_tie(leaf1, leaf2):
 def get_tie_leaves_in_measure(tie_chain, measure):
     leaves = []
     for leaf in tie_chain:
-        parentage = inspect_(leaf).get_parentage()
+        parentage = inspect(leaf).get_parentage()
         if parentage[1] == measure:
             leaves.append(leaf)
     return leaves
@@ -345,7 +338,6 @@ def fuse_upbeat_dotted_halves(measure):
 def divide_sixteenths_bar(measure):
     m = metertools.Meter(measure.time_signature)
     mutate(measure).rewrite_meter(m)
-    print "NOW MEASURE IS", measure
     # quarters = measure.target_duration // Duration(1,4)
     # remainder = measure.target_duration - (quarters * Duration(1,4))
     # divisions = [mathtools.NonreducedFraction(1,4)] * quarters
@@ -366,7 +358,6 @@ def impose_meter(score):
         TimeSignature(mathtools.NonreducedFraction(15, 16)): fifteen
     }
     for x, measure in enumerate(iterate(score).by_class(Measure)):
-        print "MEASURE ", x, " IS", measure
         if len(measure) == 1 and isinstance(measure[0], Rest):
             continue
         elif len(measure) >= 3 and measure.time_signature not in meters.keys():
@@ -376,7 +367,6 @@ def impose_meter(score):
             sig = measure.time_signature
             if sig in meters.keys():
                 mutate(measure).rewrite_meter(meters[sig], maximum_dot_count = 1)
-                print "AFTER SPLIT", measure
 
 def build_phrase_length_dict(shortest, longest):
     phrase_dict = {}
@@ -417,26 +407,6 @@ def choose_phrase_lengths(shortest, longest, piece_dur_in_denom_units):
             phrase_lengths.append(key)
         else:
             break
-    # seed_phrase_length = shortest
-    # print "seed phrase length is", seed_phrase_length
-    # print "seed factors are", phrase_dict[seed_phrase_length]
-    # dur_counter += seed_phrase_length
-    # last_phrase_length = seed_phrase_length
-    # phrase_lengths.append(seed_phrase_length)
-
-    #     factors = phrase_dict[last_phrase_length]
-    #     print "factors are", factors
-    #     candidate_lengths = get_next_length_candidates_from_factors(phrase_dict, factors)
-    #     candidate_lengths = eliminate_repetitions_from_candidates(last_phrase_length, phrase_lengths, candidate_lengths)
-    #     print "finally choosing phrase length from:", candidate_lengths
-    #     phrase_length = sorted(list(candidate_lengths))[0]
-    #     phrase_lengths.append(phrase_length)
-    #     dur_counter += phrase_length
-    #     last_phrase_length = phrase_length
-    #     print "DUR COUNTER IS", dur_counter
-    # copy = reversed(phrase_lengths)
-    # phrase_lengths = phrase_lengths[:-1]
-    # phrase_lengths.extend(copy)
     return phrase_lengths
 
 def mark_illegible_notes(score):
@@ -444,21 +414,25 @@ def mark_illegible_notes(score):
             add_markup_to_illegible_note(tie[0])
 
 def render_notation(shortest_phrase, longest_phrase, target_piece_dur_in_s):
+    # arguments:
+    # shortest_phrase: shortest phrase in denom units
+    # longest_phrase: longest phrase in denom units
+    # target_piece_dur_in_s: target piece dur in seconds
     bpm = 80.0
     tempo_denominator = 4
     piece_dur_in_beats = (target_piece_dur_in_s / 60.0) * bpm
     rhythm_denominator = 16
     piece_dur_in_denom_units = piece_dur_in_beats * (rhythm_denominator / 4)
     phrase_lengths = choose_phrase_lengths(shortest_phrase, longest_phrase, piece_dur_in_denom_units)
-    #for each phrase length, produce three voices with a base division of a thirty-second note.
+    # for each phrase length, produce three voices with a base division of a thirty-second note.
     score = make_score(phrase_lengths, rhythm_denominator)
     impose_meter(score)
-    tempo = Tempo((1,tempo_denominator), bpm)
+    tempo = MetronomeMark((1,tempo_denominator), bpm)
     attach(tempo, score[0][0][0])
     format_score(score)
     mark_illegible_notes(score)
-    #print some stats about the notation generated
-    score_duration_in_bars = float(inspect_(score[0][0][0]).get_duration())
+    # print some stats about the notation generated
+    score_duration_in_bars = float(inspect(score[0][0][0]).get_duration())
     score_duration_in_beats = score_duration_in_bars * tempo_denominator
     score_duration_in_minutes= float(score_duration_in_beats) / bpm
     print "The duration of the composition is", score_duration_in_beats, "beats.", "\n"
@@ -472,35 +446,17 @@ pitch_ranges = [
     pitchtools.PitchRange('[E3, B3]'),
     ]
 
-# scales = datastructuretools.CyclicTuple([
-#     tonalanalysistools.Scale('a', 'minor'),
-#     tonalanalysistools.Scale('d', 'major'),
-#     tonalanalysistools.Scale('g', 'minor'),
-#     tonalanalysistools.Scale('c', 'major'),
-#     tonalanalysistools.Scale('f', 'minor'),
-#     tonalanalysistools.Scale('bf', 'major'),
-#     tonalanalysistools.Scale('ef', 'minor'),
-#     tonalanalysistools.Scale('af', 'major'),
-#     tonalanalysistools.Scale('cs', 'minor'),
-#     tonalanalysistools.Scale('gf', 'major'),
-#     tonalanalysistools.Scale('b', 'minor'),
-#     tonalanalysistools.Scale('e', 'major'),
-#     ])
-
 scales = datastructuretools.CyclicTuple([
-    tonalanalysistools.Scale('b', 'major'),
-    tonalanalysistools.Scale('b', 'minor'),
-    tonalanalysistools.Scale('g', 'major'),
-    tonalanalysistools.Scale('g', 'minor'),
-    tonalanalysistools.Scale('ef', 'major'),
-    tonalanalysistools.Scale('ef', 'minor'),
+    tonalanalysistools.Scale(('b', 'major')),
+    tonalanalysistools.Scale(('b', 'minor')),
+    tonalanalysistools.Scale(('g', 'major')),
+    tonalanalysistools.Scale(('g', 'minor')),
+    tonalanalysistools.Scale(('ef', 'major')),
+    tonalanalysistools.Scale(('ef', 'minor')),
     ])
 
 seed(10)
-#shortest phrase in denom units
-#longest phrase in denom units
-#target piece dur in seconds
 score = render_notation(50, 130, 300)
-sketch = make_sketch_lilypond_file(score)
+sketch = make_lilypond_file(score)
 show(sketch)
 play(sketch)
